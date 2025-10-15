@@ -11,6 +11,8 @@ require('dotenv').config();
 const app = express();
 const server = http.createServer(app);
 const io = new socketio.Server(server, { cors: { origin: process.env.FRONTEND_URL || '*' } });
+const alertRoutes = require('./routes/alerts');
+app.use('/api/alerts', alertRoutes);
 
 app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
 app.use(express.json());
