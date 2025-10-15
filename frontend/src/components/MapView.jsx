@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 import { fetchDevices } from '../api';
@@ -13,7 +13,7 @@ L.Icon.Default.mergeOptions({
 export default function MapView({ token }){
   const [devices, setDevices] = useState([]);
 
-  useEffect(()=>{ (async ()=>{ const ds = await fetchDevices(token); setDevices(ds); })(); },[]);
+  useEffect(()=>{ (async ()=>{ try { const ds = await fetchDevices(token); setDevices(ds || []); } catch(e){ console.error(e); } })(); },[token]);
 
   useEffect(()=>{
     function onTelemetry(e){ const t = e.detail; setDevices(prev=>{
@@ -24,16 +24,20 @@ export default function MapView({ token }){
     return ()=> window.removeEventListener('telemetry', onTelemetry);
   },[]);
 
+  // default center fallback
+  const center = [38.72, -9.14];
+
   return (
-    <MapContainer center={[38.72, -9.14]} zoom={13} style={{ height:'100vh' }}>
+    <MapContainer center={center} zoom={13} className="leaflet-container" style={{ minHeight: '60vh' }}>
       <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
       {devices.map(d=> (
-        <Marker key={d._id} position={d.location?.coordinates ? [d.location.coordinates[1], d.location.coordinates[0]] : [38.72,-9.14]}>
+        <Marker key={d._id} position={d.location?.coordinates ? [d.location.coordinates[1], d.location.coordinates[0]] : center}>
           <Popup>
-            <div>
+            <div style={{ minWidth:200 }}>
               <strong>{d.name || d._id}</strong>
-              <div>Estado: {d.status}</div>
-              <div>Last fill: {d.lastTelemetry?.fillPercent ?? '—'}%</div>
+              <div style={{ color:'#6b7280', fontSize:13 }}>Estado: {d.status}</div>
+              <div>Último nível: {d.lastTelemetry?.fillPercent ?? '—'}%</div>
+              <div style={{ fontSize:12, color:'#6b7280' }}>Bateria: {d.lastTelemetry?.battery_percent ?? '—'}%</div>
             </div>
           </Popup>
         </Marker>
