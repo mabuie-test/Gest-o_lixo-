@@ -15,6 +15,9 @@ const io = new socketio.Server(server, { cors: { origin: process.env.FRONTEND_UR
 app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
 app.use(express.json());
 
+// Health check (útil para Render)
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
+
 app.use('/api/auth', authRoutes);
 app.use('/api/devices', deviceRoutes);
 app.use('/api/devices', telemetryRoutes); // telemetry route uses /:id/telemetry
