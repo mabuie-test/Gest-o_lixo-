@@ -1,4 +1,4 @@
-const express = require('express');
+ const express = require('express');
 const router = express.Router();
 const Device = require('../models/Device');
 const auth = require('../middleware/authMiddleware');
