@@ -1,4 +1,4 @@
-const express = require('express');
+ const express = require('express');
 const router = express.Router();
 const Telemetry = require('../models/Telemetry');
 const Device = require('../models/Device');
