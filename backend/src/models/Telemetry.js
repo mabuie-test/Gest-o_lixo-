@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+ const mongoose = require('mongoose');
 
 const TelemetrySchema = new mongoose.Schema({
   deviceId: { type: String, required: true, index: true },
