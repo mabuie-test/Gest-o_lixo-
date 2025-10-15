@@ -1,7 +1,6 @@
- // frontend/src/components/AdminPanel.jsx
 import React, { useEffect, useState } from 'react';
 import { fetchDevices, createDevice, updateDevice, deleteDevice, generateDeviceToken,
-         fetchUsers, createUser, updateUser, deleteUser,
+         fetchUsers, createUser, deleteUser,
          fetchAlerts, ackAlert, fetchTelemetryStats } from '../api';
 
 export default function AdminPanel({ user }) {
@@ -23,7 +22,6 @@ export default function AdminPanel({ user }) {
     } catch(e){ console.error(e); }
   }
 
-  // Devices actions
   async function onCreateDevice(){
     const payload = { name: deviceForm.name || 'New device', location: deviceForm.location || undefined, config: { telemetryInterval: 1800, alertThreshold: 85 } };
     const d = await createDevice(user.token, payload);
@@ -51,7 +49,6 @@ export default function AdminPanel({ user }) {
     alert(JSON.stringify(stats, null, 2));
   }
 
-  // Users actions
   const [newUser, setNewUser] = useState({ email:'', password:'', name:'', role:'viewer' });
   async function onCreateUser(){
     await createUser(user.token, newUser);
@@ -64,63 +61,54 @@ export default function AdminPanel({ user }) {
     await loadAll();
   }
 
-  // Alerts
   async function onAck(id){
     await ackAlert(user.token, id);
     setAlerts(prev => prev.map(a=> a._id === id ? { ...a, acknowledged: true } : a));
   }
 
   return (
-    <div style={{ padding: 12 }}>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-        <div><strong>Admin Panel</strong> — {user.user.email} ({user.user.role})</div>
-        <div>
-          <button onClick={()=>setTab('devices')} disabled={tab==='devices'}>Devices</button>
-          <button onClick={()=>setTab('alerts')} disabled={tab==='alerts'} style={{ marginLeft:8 }}>Alerts</button>
-          <button onClick={()=>setTab('users')} disabled={tab==='users'} style={{ marginLeft:8 }}>Users</button>
-        </div>
+    <div>
+      <div style={{ display:'flex', gap:8, marginBottom:12 }}>
+        <button className={`btn ${tab==='devices' ? '' : 'secondary'}`} onClick={()=>setTab('devices')}><i className="fa-solid fa-boxes-stacked"></i> Devices</button>
+        <button className={`btn ${tab==='alerts' ? '' : 'secondary'}`} onClick={()=>setTab('alerts')}><i className="fa-solid fa-bell"></i> Alerts</button>
+        <button className={`btn ${tab==='users' ? '' : 'secondary'}`} onClick={()=>setTab('users')}><i className="fa-solid fa-users"></i> Users</button>
       </div>
-
-      <hr/>
 
       {tab === 'devices' && (
         <div>
-          <h4>Devices</h4>
-          <div style={{ display:'flex' }}>
-            <div style={{ flex:1 }}>
-              <ul>
-                {devices.map(d=> (
-                  <li key={d._id} style={{ marginBottom:6 }}>
-                    <strong>{d._id}</strong> — {d.name || 'sem nome'} — {d.status}
-                    <div>
-                      <button onClick={()=>{ setSelectedDevice(d); setDeviceForm({ name:d.name, config:d.config, location:d.location }) }}>Abrir</button>
-                      <button onClick={()=>onDeleteDevice(d._id)} style={{ marginLeft:6 }}>Apagar</button>
-                      <button onClick={()=>onLoadDeviceStats(d._id)} style={{ marginLeft:6 }}>Stats</button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div style={{ width:360, marginLeft:12 }}>
-              <h5>{selectedDevice ? 'Editar Device' : 'Novo Device'}</h5>
-              <div>
-                <input placeholder="Nome" value={deviceForm.name || ''} onChange={e=>setDeviceForm({...deviceForm, name: e.target.value})} />
-              </div>
-              <div>
-                <input placeholder="Lat,Lng ex: 38.72,-9.14" value={deviceForm.location ? deviceForm.location.coordinates.join(',') : ''} onChange={e=>{
-                  const v = e.target.value.split(',').map(s=>parseFloat(s.trim()));
-                  if (v.length===2 && !v.some(isNaN)) setDeviceForm({...deviceForm, location: { type: 'Point', coordinates: [v[1], v[0]] }});
-                  else setDeviceForm({...deviceForm, location: undefined});
-                }} />
-              </div>
-              <div style={{ marginTop:8 }}>
-                {!selectedDevice && <button onClick={onCreateDevice}>Criar</button>}
-                {selectedDevice && <>
-                  <button onClick={onUpdateDevice}>Guardar</button>
-                  <button onClick={onGenerateToken} style={{ marginLeft:8 }}>Gerar Token</button>
-                </>}
-                <button onClick={()=>{ setSelectedDevice(null); setDeviceForm({}); }} style={{ marginLeft:8 }}>Limpar</button>
-              </div>
+          <div className="card">
+            <h4>Dispositivos</h4>
+            <ul className="device-list">
+              {devices.map(d=> (
+                <li key={d._id}>
+                  <div>
+                    <strong>{d._id}</strong> <div style={{ color:'#6b7280' }}>{d.name || 'sem nome'}</div>
+                  </div>
+                  <div style={{ display:'flex', gap:6 }}>
+                    <button className="btn secondary" onClick={()=>{ setSelectedDevice(d); setDeviceForm({ name:d.name, config:d.config, location:d.location }) }}><i className="fa-solid fa-pen"></i></button>
+                    <button className="btn warn" onClick={()=>onDeleteDevice(d._id)}><i className="fa-solid fa-trash"></i></button>
+                    <button className="btn" onClick={()=>onLoadDeviceStats(d._id)}><i className="fa-solid fa-chart-line"></i></button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="card" style={{ marginTop:12 }}>
+            <h5>{selectedDevice ? 'Editar Device' : 'Novo Device'}</h5>
+            <input placeholder="Nome" value={deviceForm.name || ''} onChange={e=>setDeviceForm({...deviceForm, name: e.target.value})} />
+            <input placeholder="Lat,Lng ex: 38.72,-9.14" value={deviceForm.location ? deviceForm.location.coordinates.join(',') : ''} onChange={e=>{
+              const v = e.target.value.split(',').map(s=>parseFloat(s.trim()));
+              if (v.length===2 && !v.some(isNaN)) setDeviceForm({...deviceForm, location: { type: 'Point', coordinates: [v[1], v[0]] }});
+              else setDeviceForm({...deviceForm, location: undefined});
+            }} style={{ marginTop:8 }} />
+            <div style={{ marginTop:10 }}>
+              {!selectedDevice && <button className="btn" onClick={onCreateDevice}>Criar</button>}
+              {selectedDevice && <>
+                <button className="btn" onClick={onUpdateDevice}>Guardar</button>
+                <button className="btn" style={{ marginLeft:8 }} onClick={onGenerateToken}><i className="fa-solid fa-key"></i> Gerar Token</button>
+              </>}
+              <button className="btn secondary" onClick={()=>{ setSelectedDevice(null); setDeviceForm({}); }} style={{ marginLeft:8 }}>Limpar</button>
             </div>
           </div>
         </div>
@@ -129,44 +117,56 @@ export default function AdminPanel({ user }) {
       {tab === 'alerts' && (
         <div>
           <h4>Alerts</h4>
-          <ul>
+          <div>
             {alerts.map(a=> (
-              <li key={a._id} style={{ marginBottom:8 }}>
-                <strong>{a.level}</strong> [{new Date(a.ts).toLocaleString()}] — {a.deviceId} — {a.message} {a.acknowledged ? '(ACK)' : ''}
+              <div key={a._id} className={`alert-item ${a.level === 'critical' ? 'critical' : a.level === 'warning' ? 'warning' : ''} card`} style={{ marginTop:8 }}>
                 <div>
-                  {!a.acknowledged && <button onClick={()=>onAck(a._id)}>ACK</button>}
+                  <div style={{ fontWeight:700 }}>{a.message}</div>
+                  <div style={{ fontSize:12, color:'#6b7280' }}>{a.deviceId} • {new Date(a.ts).toLocaleString()}</div>
                 </div>
-              </li>
+                <div>
+                  {!a.acknowledged && <button className="btn" onClick={()=>onAck(a._id)}><i className="fa-solid fa-check"></i> ACK</button>}
+                </div>
+              </div>
             ))}
-          </ul>
+          </div>
         </div>
       )}
 
       {tab === 'users' && (
         <div>
-          <h4>Users</h4>
-          <div>
+          <h4>Utilizadores</h4>
+
+          <div className="card">
             <h5>Criar utilizador</h5>
             <input placeholder="Email" value={newUser.email} onChange={e=>setNewUser({...newUser, email:e.target.value})} />
-            <input placeholder="Password" value={newUser.password} onChange={e=>setNewUser({...newUser, password:e.target.value})} />
-            <input placeholder="Nome" value={newUser.name} onChange={e=>setNewUser({...newUser, name:e.target.value})} />
-            <select value={newUser.role} onChange={e=>setNewUser({...newUser, role:e.target.value})}><option>viewer</option><option>operator</option><option>admin</option></select>
-            <div><button onClick={onCreateUser}>Criar</button></div>
+            <input placeholder="Password" value={newUser.password} onChange={e=>setNewUser({...newUser, password:e.target.value})} style={{ marginTop:8 }} />
+            <input placeholder="Nome" value={newUser.name} onChange={e=>setNewUser({...newUser, name:e.target.value})} style={{ marginTop:8 }} />
+            <select value={newUser.role} onChange={e=>setNewUser({...newUser, role:e.target.value})} style={{ marginTop:8 }}>
+              <option value="viewer">viewer</option>
+              <option value="operator">operator</option>
+              <option value="admin">admin</option>
+            </select>
+            <div style={{ marginTop:10 }}><button className="btn" onClick={onCreateUser}>Criar</button></div>
           </div>
 
-          <hr/>
-
-          <div>
+          <div style={{ marginTop:12 }} className="card">
             <h5>Lista de users</h5>
-            <ul>
+            <ul style={{ listStyle:'none', padding:0 }}>
               {users.map(u=> (
-                <li key={u._id}>
-                  {u.email} — {u.role} — {u.name}
-                  <button onClick={()=>onDeleteUser(u._id)} style={{ marginLeft:6 }}>Apagar</button>
+                <li key={u._id} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 0', borderBottom:'1px dashed rgba(0,0,0,0.03)' }}>
+                  <div>
+                    <div style={{ fontWeight:700 }}>{u.email}</div>
+                    <div style={{ fontSize:12, color:'#6b7280' }}>{u.role} • {u.name}</div>
+                  </div>
+                  <div>
+                    <button className="btn warn" onClick={()=>onDeleteUser(u._id)}><i className="fa-solid fa-trash"></i></button>
+                  </div>
                 </li>
               ))}
             </ul>
           </div>
+
         </div>
       )}
 
