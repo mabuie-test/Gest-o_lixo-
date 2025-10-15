@@ -1,10 +1,11 @@
-{
+ {
   "name": "smartbins-backend",
-  "version": "1.40.0",
+  "version": "1.0.0",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js"
+    "dev": "nodemon src/server.js",
+    "seed": "node src/seedAdmin.js"
   },
   "dependencies": {
     "bcrypt": "^5.1.0",
@@ -13,7 +14,8 @@
     "jsonwebtoken": "^9.0.0",
     "mongoose": "^7.3.1",
     "socket.io": "^4.7.2",
-    "winston": "^3.9.0"
+    "winston": "^3.9.0",
+    "dotenv": "^16.3.1"
   },
   "devDependencies": {
     "nodemon": "^2.0.22"
