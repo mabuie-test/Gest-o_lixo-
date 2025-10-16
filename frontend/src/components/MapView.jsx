@@ -1,47 +1,57 @@
-import React, { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
-import L from 'leaflet';
-import { fetchDevices } from '../api';
+ // backend/src/routes/devices.js
+const express = require('express');
+const router = express.Router();
+const Device = require('../models/Device');
+const auth = require('../middleware/authMiddleware');
+const crypto = require('crypto');
 
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png'
+// criar device (admin)
+router.post('/', auth, async (req,res)=>{
+  if (req.user.role !== 'admin') return res.status(403).send('Forbidden');
+  const payload = req.body;
+  // id pode ser passado ou gerado
+  const id = payload._id || ('dev-' + crypto.randomBytes(4).toString('hex'));
+  payload._id = id;
+  const d = new Device(payload); await d.save();
+  res.status(201).json(d);
 });
 
-export default function MapView({ token }){
-  const [devices, setDevices] = useState([]);
+// listar devices
+router.get('/', auth, async (req,res)=>{
+  const list = await Device.find({}); res.json(list);
+});
 
-  useEffect(()=>{ (async ()=>{ try { const ds = await fetchDevices(token); setDevices(ds || []); } catch(e){ console.error(e); } })(); },[token]);
+// obter device
+router.get('/:id', auth, async (req,res)=>{
+  const d = await Device.findById(req.params.id); if(!d) return res.status(404).end(); res.json(d);
+});
 
-  useEffect(()=>{
-    function onTelemetry(e){ const t = e.detail; setDevices(prev=>{
-      const copy = prev.map(d=> d._id === t.deviceId ? { ...d, lastTelemetry: t } : d);
-      return copy;
-    }); }
-    window.addEventListener('telemetry', onTelemetry);
-    return ()=> window.removeEventListener('telemetry', onTelemetry);
-  },[]);
+// atualizar device (admin)
+router.put('/:id', auth, async (req,res)=>{
+  if (req.user.role !== 'admin') return res.status(403).send('Forbidden');
+  const upd = await Device.findByIdAndUpdate(req.params.id, req.body, { new: true, upsert: false });
+  if (!upd) return res.status(404).end();
+  // emitir update
+  const io = req.app.locals.io;
+  io.emit('device:update', upd);
+  res.json(upd);
+});
 
-  // default center fallback
-  const center = [38.72, -9.14];
+// apagar device (admin)
+router.delete('/:id', auth, async (req,res)=>{
+  if (req.user.role !== 'admin') return res.status(403).send('Forbidden');
+  await Device.findByIdAndDelete(req.params.id);
+  res.json({ ok: true });
+});
 
-  return (
-    <MapContainer center={center} zoom={13} className="leaflet-container" style={{ minHeight: '60vh' }}>
-      <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-      {devices.map(d=> (
-        <Marker key={d._id} position={d.location?.coordinates ? [d.location.coordinates[1], d.location.coordinates[0]] : center}>
-          <Popup>
-            <div style={{ minWidth:200 }}>
-              <strong>{d.name || d._id}</strong>
-              <div style={{ color:'#6b7280', fontSize:13 }}>Estado: {d.status}</div>
-              <div>Último nível: {d.lastTelemetry?.fillPercent ?? '—'}%</div>
-              <div style={{ fontSize:12, color:'#6b7280' }}>Bateria: {d.lastTelemetry?.battery_percent ?? '—'}%</div>
-            </div>
-          </Popup>
-        </Marker>
-      ))}
-    </MapContainer>
-  );
-}
+// gerar token de dispositivo (admin) — token simples p/ provar autenticação de device
+router.post('/:id/token', auth, async (req,res)=>{
+  if (req.user.role !== 'admin') return res.status(403).send('Forbidden');
+  // token = random hex + deviceId (não é JWT; podes trocar por JWT se preferir)
+  const token = crypto.randomBytes(20).toString('hex');
+  // guardar token no campo config.deviceToken (ou numa coleção dedicada)
+  await Device.findByIdAndUpdate(req.params.id, { $set: { 'config.deviceToken': token }}, { upsert: false });
+  res.json({ token });
+});
+
+module.exports = router;
