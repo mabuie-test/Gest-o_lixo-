@@ -1,28 +1,42 @@
+ // frontend/src/components/AdminPanel.jsx
 import React, { useEffect, useState } from 'react';
-import { fetchDevices, createDevice, updateDevice, deleteDevice, generateDeviceToken,
-         fetchUsers, createUser, deleteUser,
-         fetchAlerts, ackAlert, fetchTelemetryStats } from '../api';
+import {
+  fetchDevices, createDevice, updateDevice, deleteDevice, generateDeviceToken,
+  fetchUsers, createUser, deleteUser,
+  fetchAlerts, ackAlert, fetchTelemetryStats
+} from '../api';
 
 export default function AdminPanel({ user }) {
   const [tab, setTab] = useState('devices');
+
+  // devices/users/alerts state
   const [devices, setDevices] = useState([]);
   const [users, setUsers] = useState([]);
   const [alerts, setAlerts] = useState([]);
+
+  // device form state (supports incremental coords typing via coordsText)
   const [selectedDevice, setSelectedDevice] = useState(null);
-  const [deviceForm, setDeviceForm] = useState({}); // will hold name, config, location, coordsText
+  const [deviceForm, setDeviceForm] = useState({ name: '', config: {}, coordsText: '', location: undefined });
+
+  // new user form
+  const [newUser, setNewUser] = useState({ email:'', password:'', name:'', role:'viewer' });
 
   useEffect(()=>{ loadAll(); }, []);
 
   async function loadAll(){
     try {
-      const [ds, us, al] = await Promise.all([fetchDevices(user.token), fetchUsers(user.token), fetchAlerts(user.token)]);
+      const [ds, us, al] = await Promise.all([
+        fetchDevices(user.token).catch(()=>[]),
+        fetchUsers(user.token).catch(()=>[]),
+        fetchAlerts(user.token).catch(()=>[])
+      ]);
       setDevices(ds || []);
       setUsers(us || []);
       setAlerts(al || []);
-    } catch(e){ console.error(e); }
+    } catch(e){ console.error('loadAll error', e); }
   }
 
-  // helper: try to parse coordsText string "lat,lng" into location object
+  // helper: parse coords string "lat,lng" => GeoJSON Point or null
   function parseCoordsText(text) {
     if (!text || typeof text !== 'string') return null;
     const parts = text.split(',').map(s => s.trim()).filter(Boolean);
@@ -30,15 +44,24 @@ export default function AdminPanel({ user }) {
     const lat = parseFloat(parts[0].replace(',', '.'));
     const lng = parseFloat(parts[1].replace(',', '.'));
     if (Number.isFinite(lat) && Number.isFinite(lng)) {
-      // store as GeoJSON Point: coordinates: [lng, lat]
       return { type: 'Point', coordinates: [lng, lat] };
     }
     return null;
   }
 
-  // Devices actions
+  // open device into form
+  function openDeviceForEdit(d) {
+    setSelectedDevice(d);
+    setDeviceForm({
+      name: d.name || '',
+      config: d.config || { telemetryInterval: 1800, alertThreshold: 85 },
+      location: d.location || undefined,
+      coordsText: d.location ? `${d.location.coordinates[1]},${d.location.coordinates[0]}` : ''
+    });
+  }
+
+  // create device
   async function onCreateDevice(){
-    // parse coordsText if present
     const location = parseCoordsText(deviceForm.coordsText);
     const payload = {
       name: deviceForm.name || 'New device',
@@ -48,12 +71,19 @@ export default function AdminPanel({ user }) {
     try {
       const d = await createDevice(user.token, payload);
       setDevices(prev => [d, ...prev]);
-      setDeviceForm({});
-    } catch(e) { console.error('create device error', e); alert('Erro ao criar device'); }
+      setDeviceForm({ name:'', config:{}, coordsText:'', location: undefined });
+      // notify map / other components
+      window.dispatchEvent(new CustomEvent('devices:updated', { detail: d }));
+      alert('Device criado com sucesso');
+    } catch(e) {
+      console.error('create device error', e);
+      alert('Erro ao criar device: ' + (e.message || 'ver logs'));
+    }
   }
 
+  // update device
   async function onUpdateDevice(){
-    if (!selectedDevice) return;
+    if (!selectedDevice) { alert('Seleciona um device para editar'); return; }
     const location = parseCoordsText(deviceForm.coordsText);
     const payload = {
       name: deviceForm.name,
@@ -64,47 +94,80 @@ export default function AdminPanel({ user }) {
       const u = await updateDevice(user.token, selectedDevice._id, payload);
       setDevices(prev => prev.map(p=> p._id === u._id ? u : p));
       setSelectedDevice(u);
-      // sync coordsText with updated location
       setDeviceForm(prev => ({ ...prev, location: u.location, coordsText: u.location ? `${u.location.coordinates[1]},${u.location.coordinates[0]}` : '' }));
-    } catch(e) { console.error('update device error', e); alert('Erro ao atualizar device'); }
-  }
-
-  async function onDeleteDevice(id){
-    if (!confirm('Apagar device?')) return;
-    await deleteDevice(user.token, id);
-    setDevices(prev => prev.filter(p=> p._id !== id));
-    if (selectedDevice && selectedDevice._id === id) {
-      setSelectedDevice(null);
-      setDeviceForm({});
+      window.dispatchEvent(new CustomEvent('devices:updated', { detail: u }));
+      alert('Device atualizado');
+    } catch(e) {
+      console.error('update device error', e);
+      alert('Erro ao atualizar device: ' + (e.message || 'ver logs'));
     }
   }
 
-  async function onGenerateToken(){
-    if (!selectedDevice) return;
-    const res = await generateDeviceToken(user.token, selectedDevice._id);
-    alert('Device token: ' + res.token);
+  // delete device
+  async function onDeleteDevice(id){
+    if (!confirm('Apagar device?')) return;
+    try {
+      await deleteDevice(user.token, id);
+      setDevices(prev => prev.filter(p=> p._id !== id));
+      if (selectedDevice && selectedDevice._id === id) { setSelectedDevice(null); setDeviceForm({ name:'', config:{}, coordsText:'', location: undefined }); }
+      window.dispatchEvent(new CustomEvent('devices:updated', { detail: { _id: id, deleted: true } }));
+      alert('Device apagado');
+    } catch(e) {
+      console.error('delete device error', e);
+      alert('Erro ao apagar device');
+    }
   }
 
+  // generate token
+  async function onGenerateToken(){
+    try {
+      if (!selectedDevice) return alert('Seleciona um device primeiro');
+      const res = await generateDeviceToken(user.token, selectedDevice._id);
+      if (!res || !res.token) {
+        console.warn('generateDeviceToken returned:', res);
+        return alert('Erro: token não gerado (verificar logs do backend).');
+      }
+      try { await navigator.clipboard.writeText(res.token); } catch(e){}
+      alert('Token gerado e copiado para área de transferência:\n' + res.token);
+    } catch(e) {
+      console.error('token error', e);
+      alert('Erro ao gerar token: ' + (e.message || e));
+    }
+  }
+
+  // load telemetry stats
   async function onLoadDeviceStats(id){
     try {
       const stats = await fetchTelemetryStats(id, user.token);
       alert(JSON.stringify(stats, null, 2));
-    } catch(e){ console.error(e); alert('Erro ao obter stats'); }
+    } catch(e) {
+      console.error('stats error', e);
+      alert('Erro ao obter stats');
+    }
   }
 
-  // Users actions
-  const [newUser, setNewUser] = useState({ email:'', password:'', name:'', role:'viewer' });
+  // Users
   async function onCreateUser(){
     try {
       await createUser(user.token, newUser);
       setNewUser({ email:'', password:'', name:'', role:'viewer' });
       await loadAll();
-    } catch(e){ console.error('create user', e); alert('Erro ao criar user'); }
+      alert('Utilizador criado');
+    } catch(e) {
+      console.error('create user', e);
+      alert('Erro ao criar utilizador');
+    }
   }
   async function onDeleteUser(id){
     if (!confirm('Apagar user?')) return;
-    await deleteUser(user.token, id);
-    await loadAll();
+    try {
+      await deleteUser(user.token, id);
+      await loadAll();
+      alert('Utilizador apagado');
+    } catch(e) {
+      console.error('delete user', e);
+      alert('Erro ao apagar utilizador');
+    }
   }
 
   // Alerts
@@ -112,18 +175,10 @@ export default function AdminPanel({ user }) {
     try {
       await ackAlert(user.token, id);
       setAlerts(prev => prev.map(a=> a._id === id ? { ...a, acknowledged: true } : a));
-    } catch(e){ console.error(e); alert('Erro ao reconhecer alerta'); }
-  }
-
-  // when user selects a device to edit, populate deviceForm and coordsText
-  function openDeviceForEdit(d) {
-    setSelectedDevice(d);
-    setDeviceForm({
-      name: d.name || '',
-      config: d.config || { telemetryInterval:1800, alertThreshold:85 },
-      location: d.location || undefined,
-      coordsText: d.location ? `${d.location.coordinates[1]},${d.location.coordinates[0]}` : ''
-    });
+    } catch(e) {
+      console.error('ack alert', e);
+      alert('Erro ao reconhecer alerta');
+    }
   }
 
   return (
@@ -142,12 +197,13 @@ export default function AdminPanel({ user }) {
               {devices.map(d=> (
                 <li key={d._id}>
                   <div>
-                    <strong>{d._id}</strong> <div style={{ color:'#6b7280' }}>{d.name || 'sem nome'}</div>
+                    <strong>{d._id}</strong>
+                    <div style={{ color:'#6b7280' }}>{d.name || 'sem nome'}</div>
                   </div>
                   <div style={{ display:'flex', gap:6 }}>
-                    <button className="btn secondary" onClick={()=>openDeviceForEdit(d)}><i className="fa-solid fa-pen"></i></button>
-                    <button className="btn warn" onClick={()=>onDeleteDevice(d._id)}><i className="fa-solid fa-trash"></i></button>
-                    <button className="btn" onClick={()=>onLoadDeviceStats(d._id)}><i className="fa-solid fa-chart-line"></i></button>
+                    <button className="btn secondary" onClick={()=>openDeviceForEdit(d)} title="Editar"><i className="fa-solid fa-pen"></i></button>
+                    <button className="btn warn" onClick={()=>onDeleteDevice(d._id)} title="Apagar"><i className="fa-solid fa-trash"></i></button>
+                    <button className="btn" onClick={()=>onLoadDeviceStats(d._id)} title="Stats"><i className="fa-solid fa-chart-line"></i></button>
                   </div>
                 </li>
               ))}
@@ -158,23 +214,24 @@ export default function AdminPanel({ user }) {
             <h5>{selectedDevice ? 'Editar Device' : 'Novo Device'}</h5>
             <input placeholder="Nome" value={deviceForm.name || ''} onChange={e=>setDeviceForm({...deviceForm, name: e.target.value})} />
 
-            {/* coords input controlled by coordsText to allow incremental typing */}
             <input
               placeholder="Lat,Lng ex: 38.72,-9.14"
               value={deviceForm.coordsText || ''}
               onChange={e=>setDeviceForm({...deviceForm, coordsText: e.target.value})}
               style={{ marginTop:8 }}
             />
+
             <div style={{ marginTop:10 }}>
               {!selectedDevice && <button className="btn" onClick={onCreateDevice}>Criar</button>}
               {selectedDevice && <>
                 <button className="btn" onClick={onUpdateDevice}>Guardar</button>
                 <button className="btn" style={{ marginLeft:8 }} onClick={onGenerateToken}><i className="fa-solid fa-key"></i> Gerar Token</button>
               </>}
-              <button className="btn secondary" onClick={()=>{ setSelectedDevice(null); setDeviceForm({}); }} style={{ marginLeft:8 }}>Limpar</button>
+              <button className="btn secondary" onClick={()=>{ setSelectedDevice(null); setDeviceForm({ name:'', config:{}, coordsText:'', location: undefined }); }} style={{ marginLeft:8 }}>Limpar</button>
             </div>
+
             <div style={{ marginTop:8, fontSize:12, color:'#6b7280' }}>
-              Dica: escreve as coordenadas como <code>lat,lng</code> (ex.: <em>38.72,-9.14</em>) e só serão aplicadas quando criares/guardares.
+              Dica: escreve as coordenadas como <code>lat,lng</code> (ex.: <em>38.72,-9.14</em>). Só serão aplicadas ao criar/guardar.
             </div>
           </div>
         </div>
@@ -235,7 +292,6 @@ export default function AdminPanel({ user }) {
 
         </div>
       )}
-
     </div>
   );
 }
