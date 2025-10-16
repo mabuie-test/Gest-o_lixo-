@@ -9,7 +9,7 @@ export default function AdminPanel({ user }) {
   const [users, setUsers] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [selectedDevice, setSelectedDevice] = useState(null);
-  const [deviceForm, setDeviceForm] = useState({});
+  const [deviceForm, setDeviceForm] = useState({}); // will hold name, config, location, coordsText
 
   useEffect(()=>{ loadAll(); }, []);
 
@@ -22,38 +22,84 @@ export default function AdminPanel({ user }) {
     } catch(e){ console.error(e); }
   }
 
-  async function onCreateDevice(){
-    const payload = { name: deviceForm.name || 'New device', location: deviceForm.location || undefined, config: { telemetryInterval: 1800, alertThreshold: 85 } };
-    const d = await createDevice(user.token, payload);
-    setDevices(prev => [d, ...prev]);
-    setDeviceForm({});
+  // helper: try to parse coordsText string "lat,lng" into location object
+  function parseCoordsText(text) {
+    if (!text || typeof text !== 'string') return null;
+    const parts = text.split(',').map(s => s.trim()).filter(Boolean);
+    if (parts.length !== 2) return null;
+    const lat = parseFloat(parts[0].replace(',', '.'));
+    const lng = parseFloat(parts[1].replace(',', '.'));
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      // store as GeoJSON Point: coordinates: [lng, lat]
+      return { type: 'Point', coordinates: [lng, lat] };
+    }
+    return null;
   }
+
+  // Devices actions
+  async function onCreateDevice(){
+    // parse coordsText if present
+    const location = parseCoordsText(deviceForm.coordsText);
+    const payload = {
+      name: deviceForm.name || 'New device',
+      location: location || undefined,
+      config: deviceForm.config || { telemetryInterval: 1800, alertThreshold: 85 }
+    };
+    try {
+      const d = await createDevice(user.token, payload);
+      setDevices(prev => [d, ...prev]);
+      setDeviceForm({});
+    } catch(e) { console.error('create device error', e); alert('Erro ao criar device'); }
+  }
+
   async function onUpdateDevice(){
     if (!selectedDevice) return;
-    const u = await updateDevice(user.token, selectedDevice._id, deviceForm);
-    setDevices(prev => prev.map(p=> p._id === u._id ? u : p));
-    setSelectedDevice(u);
+    const location = parseCoordsText(deviceForm.coordsText);
+    const payload = {
+      name: deviceForm.name,
+      config: deviceForm.config,
+      location: location || deviceForm.location || undefined
+    };
+    try {
+      const u = await updateDevice(user.token, selectedDevice._id, payload);
+      setDevices(prev => prev.map(p=> p._id === u._id ? u : p));
+      setSelectedDevice(u);
+      // sync coordsText with updated location
+      setDeviceForm(prev => ({ ...prev, location: u.location, coordsText: u.location ? `${u.location.coordinates[1]},${u.location.coordinates[0]}` : '' }));
+    } catch(e) { console.error('update device error', e); alert('Erro ao atualizar device'); }
   }
+
   async function onDeleteDevice(id){
     if (!confirm('Apagar device?')) return;
     await deleteDevice(user.token, id);
     setDevices(prev => prev.filter(p=> p._id !== id));
+    if (selectedDevice && selectedDevice._id === id) {
+      setSelectedDevice(null);
+      setDeviceForm({});
+    }
   }
+
   async function onGenerateToken(){
     if (!selectedDevice) return;
     const res = await generateDeviceToken(user.token, selectedDevice._id);
     alert('Device token: ' + res.token);
   }
+
   async function onLoadDeviceStats(id){
-    const stats = await fetchTelemetryStats(id, user.token);
-    alert(JSON.stringify(stats, null, 2));
+    try {
+      const stats = await fetchTelemetryStats(id, user.token);
+      alert(JSON.stringify(stats, null, 2));
+    } catch(e){ console.error(e); alert('Erro ao obter stats'); }
   }
 
+  // Users actions
   const [newUser, setNewUser] = useState({ email:'', password:'', name:'', role:'viewer' });
   async function onCreateUser(){
-    await createUser(user.token, newUser);
-    setNewUser({ email:'', password:'', name:'', role:'viewer' });
-    await loadAll();
+    try {
+      await createUser(user.token, newUser);
+      setNewUser({ email:'', password:'', name:'', role:'viewer' });
+      await loadAll();
+    } catch(e){ console.error('create user', e); alert('Erro ao criar user'); }
   }
   async function onDeleteUser(id){
     if (!confirm('Apagar user?')) return;
@@ -61,9 +107,23 @@ export default function AdminPanel({ user }) {
     await loadAll();
   }
 
+  // Alerts
   async function onAck(id){
-    await ackAlert(user.token, id);
-    setAlerts(prev => prev.map(a=> a._id === id ? { ...a, acknowledged: true } : a));
+    try {
+      await ackAlert(user.token, id);
+      setAlerts(prev => prev.map(a=> a._id === id ? { ...a, acknowledged: true } : a));
+    } catch(e){ console.error(e); alert('Erro ao reconhecer alerta'); }
+  }
+
+  // when user selects a device to edit, populate deviceForm and coordsText
+  function openDeviceForEdit(d) {
+    setSelectedDevice(d);
+    setDeviceForm({
+      name: d.name || '',
+      config: d.config || { telemetryInterval:1800, alertThreshold:85 },
+      location: d.location || undefined,
+      coordsText: d.location ? `${d.location.coordinates[1]},${d.location.coordinates[0]}` : ''
+    });
   }
 
   return (
@@ -85,7 +145,7 @@ export default function AdminPanel({ user }) {
                     <strong>{d._id}</strong> <div style={{ color:'#6b7280' }}>{d.name || 'sem nome'}</div>
                   </div>
                   <div style={{ display:'flex', gap:6 }}>
-                    <button className="btn secondary" onClick={()=>{ setSelectedDevice(d); setDeviceForm({ name:d.name, config:d.config, location:d.location }) }}><i className="fa-solid fa-pen"></i></button>
+                    <button className="btn secondary" onClick={()=>openDeviceForEdit(d)}><i className="fa-solid fa-pen"></i></button>
                     <button className="btn warn" onClick={()=>onDeleteDevice(d._id)}><i className="fa-solid fa-trash"></i></button>
                     <button className="btn" onClick={()=>onLoadDeviceStats(d._id)}><i className="fa-solid fa-chart-line"></i></button>
                   </div>
@@ -97,11 +157,14 @@ export default function AdminPanel({ user }) {
           <div className="card" style={{ marginTop:12 }}>
             <h5>{selectedDevice ? 'Editar Device' : 'Novo Device'}</h5>
             <input placeholder="Nome" value={deviceForm.name || ''} onChange={e=>setDeviceForm({...deviceForm, name: e.target.value})} />
-            <input placeholder="Lat,Lng ex: 38.72,-9.14" value={deviceForm.location ? deviceForm.location.coordinates.join(',') : ''} onChange={e=>{
-              const v = e.target.value.split(',').map(s=>parseFloat(s.trim()));
-              if (v.length===2 && !v.some(isNaN)) setDeviceForm({...deviceForm, location: { type: 'Point', coordinates: [v[1], v[0]] }});
-              else setDeviceForm({...deviceForm, location: undefined});
-            }} style={{ marginTop:8 }} />
+
+            {/* coords input controlled by coordsText to allow incremental typing */}
+            <input
+              placeholder="Lat,Lng ex: 38.72,-9.14"
+              value={deviceForm.coordsText || ''}
+              onChange={e=>setDeviceForm({...deviceForm, coordsText: e.target.value})}
+              style={{ marginTop:8 }}
+            />
             <div style={{ marginTop:10 }}>
               {!selectedDevice && <button className="btn" onClick={onCreateDevice}>Criar</button>}
               {selectedDevice && <>
@@ -109,6 +172,9 @@ export default function AdminPanel({ user }) {
                 <button className="btn" style={{ marginLeft:8 }} onClick={onGenerateToken}><i className="fa-solid fa-key"></i> Gerar Token</button>
               </>}
               <button className="btn secondary" onClick={()=>{ setSelectedDevice(null); setDeviceForm({}); }} style={{ marginLeft:8 }}>Limpar</button>
+            </div>
+            <div style={{ marginTop:8, fontSize:12, color:'#6b7280' }}>
+              Dica: escreve as coordenadas como <code>lat,lng</code> (ex.: <em>38.72,-9.14</em>) e só serão aplicadas quando criares/guardares.
             </div>
           </div>
         </div>
